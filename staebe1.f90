@@ -25,11 +25,11 @@ real *8                                         ::                wellenzahl
 integer                                         ::                segmente_pro_stab
 
 !Koordinaten der Segmentmittelpunkte
+!Ab jetzt werden die Segmente über IDs angesprochen, die über das Programm hinweg eindeutig sind
 !coord (Stabnummer; Segmentnummer; Koordinate (1=x; 2=y; 3=z))
 real *8, allocatable, dimension(:,:,:)          ::                coord
 
 !Vektor mit allen Strömen
-!Ab jetzt werden die Segmente über IDs angesprochen, die über das Programm hinweg eindeutig sind
 real *8, allocatable, dimension(:)		::		  stroeme
 
 !Matrix
@@ -38,8 +38,8 @@ real *8, allocatable, dimension(:,:)            ::                matrix
 
 
 !Temporäre Variablen
-real *8                                         ::                rmax
-integer                                         ::                i,j,k
+real *8                                         ::                rmax, roh, beta
+integer                                         ::                i,j,k,l, id_obs, id_src
 real *8                                         ::                b,c
 
 !Integral Weights und Sample Points für Gauss-Legendre und MRW(Ma, Rouklin, Wandzura)
@@ -139,12 +139,25 @@ do i=1, staebe_anzahl
                 b = (staebe(i, 2, k) - staebe(i, 1, k)) / segmente_pro_stab
                 do j=1, segmente_pro_stab
                         coord(i, j, k) = (j-0.5) * b + staebe(i, 1, k)
-                        write (10, *) coord(i,j,k)
+                        
                 end do
         end do
 end do
 
-write (10, *) mrw
+
+!Beobachtungspunkt
+do i=1, staebe_anzahl
+        do j=1, segmente_pro_stab
+                id_obs = (i-1)*segmente_pro_stab + j
+        
+                !Quellpunkt
+                do l=1, staebe_anzahl
+                        do k=1, segmente_pro_stab
+                                id_src = (l-1)*segmente_pro_stab + k
+                                roh = sqrt( (coord(i,j,1)-coord(l,k,1))**2 + (coord(i,j,2)-coord(l,k,2))**2 )
+
+                                rmax = sqrt( ( (coord(i,j,3) - coord(l,k,3))**2 ) + ( (a(i) + roh ) ** 2 ) ) )
+                                beta = 2 * sqrt(roh * a(i)) / rmax
 
 
 end
