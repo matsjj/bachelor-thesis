@@ -1,10 +1,10 @@
-module global
-implicit none
-integer                                         ::                test
-end module global
+include 'math_functions.f90'
+include 'calculate_kernel.f90'
+
 
 program stab
-use global
+
+!use mcomelp
 implicit none
 
 !Anzahl der Staebe
@@ -26,11 +26,11 @@ integer                                         ::                segmente_pro_s
 
 !Koordinaten der Segmentmittelpunkte
 !Ab jetzt werden die Segmente über IDs angesprochen, die über das Programm hinweg eindeutig sind
-!coord (Stabnummer; Segmentnummer; Koordinate (1=x; 2=y; 3=z))
-real *8, allocatable, dimension(:,:,:)          ::                coord
+!coord (Stabnummer; Segmentnummer; Ort(1=Anfang, 2=Mitte, 3=Ende); Koordinate (1=x; 2=y; 3=z))
+real *8, allocatable, dimension(:,:,:,:)          ::                coord
 
 !Vektor mit allen Strömen
-real *8, allocatable, dimension(:)		::		  stroeme
+real *8, allocatable, dimension(:)      ::        stroeme
 
 !Matrix
 real *8, allocatable, dimension(:,:)            ::                matrix
@@ -38,80 +38,43 @@ real *8, allocatable, dimension(:,:)            ::                matrix
 
 
 !Temporäre Variablen
-real *8                                         ::                rmax, roh, beta
-integer                                         ::                i,j,k,l, id_obs, id_src
+real *8                                         ::                rmax, roh, beta, K_von_beta, temp, summe, delta_L, &
+                                                                        basis, kernel, eps1, eps2, weight, z_u, z_l
+integer                                         ::                i,j,k,l, id_obs, id_src, m, n
 real *8                                         ::                b,c
 
+real *8, dimension(3)                            ::                coord_z, coord_z_strich
+
 !Integral Weights und Sample Points für Gauss-Legendre und MRW(Ma, Rouklin, Wandzura)
-!gauss_legendre(Points, Art(1=Nodes, 2=Weights)
-real *8, allocatable, dimension(:, :)                               ::                gauss_legendre
-real *8, allocatable, dimension(:, :)                               ::                mrw
+real *8, allocatable, dimension(:)                               ::                gauss_legendre_points, &
+                                                                    gauss_legendre_weights, mrw_points, mrw_weights
+
+
+include 'constants.f90'
+include 'integrations_konstanten.f90'
 
 
 staebe_anzahl = 2
 segmente_pro_stab=5
 
+fq = 100000
+wellenzahl = 2*PI*fq*sqrt(MUE_NULL * EPSILON_NULL)
+
 allocate(staebe(staebe_anzahl,2,3))
-allocate(coord(staebe_anzahl, segmente_pro_stab, 3))
+allocate(coord(staebe_anzahl, segmente_pro_stab, 3, 3))
 allocate(matrix( segmente_pro_stab*staebe_anzahl, segmente_pro_stab*staebe_anzahl) )
 allocate(a(staebe_anzahl))
 allocate(stroeme(segmente_pro_stab * staebe_anzahl))
 
-!Integration wird mit 10 Schritten momentan fest geschrieben 
+!Integration wird mit 10 Schritten momentan fest geschrieben
 !TODO: Routine schreiben / finden, die die Nodes und Weights generisch berechnet
-allocate(gauss_legendre(10, 2))
-allocate(mrw(10, 2))
-!Quelle: http://keisan.casio.com/exec/system/1280624821
-gauss_legendre(1, 1) =	0.9931285991850949247861	
-gauss_legendre(2, 1) =	0.9639719272779137912677	
-gauss_legendre(3, 1) =	0.9122344282513259058678	
-gauss_legendre(4, 1) =	0.8391169718222188233945	
-gauss_legendre(5, 1) =	0.7463319064601507926143	
-gauss_legendre(6, 1) =	0.6360536807265150254528	
-gauss_legendre(7, 1) =	0.5108670019508270980044	
-gauss_legendre(8, 1) =	0.3737060887154195606725	
-gauss_legendre(9, 1) =	0.2277858511416450780805	
-gauss_legendre(10, 1)= 	0.0765265211334973337546	
-
-gauss_legendre(1, 2) =	0.017614007139152118312
-gauss_legendre(2, 2) =	0.040601429800386941331
-gauss_legendre(3, 2) =	0.06267204833410906357
-gauss_legendre(4, 2) =	0.0832767415767047487248
-gauss_legendre(5, 2) =	0.1019301198172404350368
-gauss_legendre(6, 2) =	0.1181945319615184173124
-gauss_legendre(7, 2) =	0.131688638449176626898
-gauss_legendre(8, 2) =	0.1420961093183820513293
-gauss_legendre(9, 2) =	0.149172986472603746788
-gauss_legendre(10, 2)= 	0.1527533871307258506981
-
-mrw(1, 1) =	0.482961710689630E-03 
-mrw(2, 1) =	0.698862921431577E-02 
-mrw(3, 1) =	0.326113965946776E-01 
-mrw(4, 1) =	0.928257573891660E-01 
-mrw(5, 1) =	0.198327256895404E+00 
-mrw(6, 1) =	0.348880142979353E+00 
-mrw(7, 1) =	0.530440555787956E+00 
-mrw(8, 1) =	0.716764648511655E+00  
-mrw(9, 1) =	0.875234557506234E+00  
-mrw(10, 1) =	0.975245698684393E+00 
-
-mrw(1, 2) =	0.183340007378985E-02 
-mrw(2, 2) =	0.134531223459918E-01 
-mrw(3, 2) =	0.404971943169583E-01 
-mrw(4, 2) =	0.818223696589036E-01 
-mrw(5, 2) =	0.129192342770138E+00 
-mrw(6, 2) =	0.169545319547259E+00 
-mrw(7, 2) =	0.189100216532996E+00 
-mrw(8, 2) =	0.177965753961471E+00 
-mrw(9, 2) =	0.133724770615462E+00 
-mrw(10, 2) =	0.628655101770325E-01
 
 
 
 !Radius der Staebe wird manuell eingefügt
 do i=1, staebe_anzahl
         a(i) = 5
-end do 
+end do
 
 !Koordinaten der Staebe manuell zuweisen
 staebe(1, 1, 1) = 0
@@ -138,32 +101,80 @@ do i=1, staebe_anzahl
                 !Entfernung zwischen Anfang und Ende
                 b = (staebe(i, 2, k) - staebe(i, 1, k)) / segmente_pro_stab
                 do j=1, segmente_pro_stab
-                        coord(i, j, k) = (j-0.5) * b + staebe(i, 1, k)
-                        
+                        coord(i, j, 1, k) = (j-1.0) * b + staebe(i, 1, k)
+                        coord(i, j, 2, k) = (j-0.5) * b + staebe(i, 1, k)
+                        coord(i, j, 3, k) = (j) * b + staebe(i, 1, k)
                 end do
         end do
 end do
 
-
-!Beobachtungspunkt
+!write(10,*) coord
+!Beobachtungspunkt (z) Hier gucken wir uns das Feld an
 do i=1, staebe_anzahl
         do j=1, segmente_pro_stab
                 id_obs = (i-1)*segmente_pro_stab + j
-        
-                !Quellpunkt
+
+                !Quellpunkt (z') Das iterieren wir über den Beobachtungspunkt
                 do l=1, staebe_anzahl
                         do k=1, segmente_pro_stab
                                 id_src = (l-1)*segmente_pro_stab + k
-                                roh = sqrt( (coord(i,j,1)-coord(l,k,1))**2 + (coord(i,j,2)-coord(l,k,2))**2 )
+                                roh = sqrt( (coord(i,j,2,1)-coord(l,k,2,1))**2 + (coord(i,j,2,2)-coord(l,k,2,2))**2 )
+                                !rmax = sqrt( ( (coord(i,j,3) - coord(l,k,3))**2 ) + ( (a(i) + roh ) ** 2 ) )
+                                !write (10,*) rmax
 
-                                rmax = sqrt( ( (coord(i,j,3) - coord(l,k,3))**2 ) + ( (a(i) + roh ) ** 2 ) ) )
-                                beta = 2 * sqrt(roh * a(i)) / rmax
+                                !beta = 2 * sqrt(roh * a(i)) / rmax
+                                !call COMELP(beta, K_von_beta)
 
+
+                                !write (10, *) 'OBS:       Stab: ',i,' Segment: ',j,'      SRC:       Stab: ',l,' Segment: ',k
+                                rmax = sqrt( ( (coord(i,j,2,3) - coord(l,k,2,3))**2 ) + ( (a(i) + roh ) ** 2 ) )
+
+                                !write (10, *) 'SRC:       Stab: ',l,' Segment: ',k
+                                !write (10, *) 'roh: ', roh, 'K: ', K_von_beta
+
+            !SUBROUTINE CALC_KERNEL(wire_radius, wellenzahl, coord_z, coord_z_strich, integrating_weights, integrating_nodes, integrating_limit, return_value)
+
+                                coord_z(1) = coord(i, j, 2, 1)
+                                coord_z(2) = coord(i, j, 2, 2)
+                                coord_z(3) = coord(i, j, 2, 3)
+
+                                summe = 0
+                                do m=1, 10
+
+                                    eps1 = gauss_legendre_points(m)
+                                    eps2 = 1 - eps1
+                                    weight = gauss_legendre_weights(m)
+
+                                    !Wir gehen davon aus, dass parallel zur z Achse
+                                    !Daher ist delta_L nur von z abhängig
+                                    delta_L = abs(coord(l, k, 3, 3) - coord(l, k, 1, 3))
+
+
+
+                                    coord_z_strich(1) = coord(l, k, 1, 1)
+                                    coord_z_strich(2) = coord(l, k, 1, 2)
+                                    coord_z_strich(3) = coord(l, k, 1, 3) + delta_L*eps2
+
+                                    call CALC_KERNEL(a(l), wellenzahl, coord_z, coord_z_strich, gauss_legendre_points, &
+                                                                    gauss_legendre_weights, 10, kernel)
+                                    call BASIS_FUNKTION(eps1, eps2, basis)
+
+                                    summe = summe + (weight * basis * kernel)
+
+
+                                end do
+                                summe = delta_L * summe
+                                matrix(id_obs, id_src) = summe
+                                !write (10, *) 'Summe: ', summe
+
+
+
+                         end do
+                 end do
+           end do
+ end do
 
 end
 
-                
 
-                
-                        
 
