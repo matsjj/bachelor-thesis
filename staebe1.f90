@@ -30,17 +30,21 @@ integer                                         ::                segmente_pro_s
 real *8, allocatable, dimension(:,:,:,:)          ::                coord
 
 !Vektor mit allen Strömen
-real *8, allocatable, dimension(:)      ::        stroeme
+complex *8, allocatable, dimension(:)      ::        stroeme
+complex *8, allocatable, dimension(:)      ::        anregung
 
 !Matrix
-real *8, allocatable, dimension(:,:)            ::                matrix
+complex *8, allocatable, dimension(:,:)            ::                matrix, a_matrix
+complex *8, allocatable, dimension(:,:)		::		  psi_matrix, e_matrix
 
 
 
 !Temporäre Variablen
 real *8                                         ::                rmax, roh, beta, K_von_beta, temp, summe, delta_L, &
-                                                                        basis, kernel, eps1, eps2, weight, z_u, z_l
-integer                                         ::                i,j,k,l, id_obs, id_src, m, n
+                                                                        basis, eps1, eps2, weight, z_u, z_l
+complex *8					::		  kernel, csumme, ctemp
+integer                                         ::                i,j,k,l, id_obs, id_src, m, n, info
+integer, allocatable, dimension(:)		::		  pivot
 real *8                                         ::                b,c
 
 real *8, dimension(3)                            ::                coord_z, coord_z_strich
@@ -51,24 +55,35 @@ real *8, allocatable, dimension(:)                               ::             
 
 
 include 'constants.f90'
-include 'integrations_konstanten.f90'
 
 
-staebe_anzahl = 2
+
+staebe_anzahl = 1
 segmente_pro_stab=5
 
-fq = 100000
+fq = 1000
 wellenzahl = 2*PI*fq*sqrt(MUE_NULL * EPSILON_NULL)
 
 allocate(staebe(staebe_anzahl,2,3))
 allocate(coord(staebe_anzahl, segmente_pro_stab, 3, 3))
 allocate(matrix( segmente_pro_stab*staebe_anzahl, segmente_pro_stab*staebe_anzahl) )
+allocate(a_matrix( segmente_pro_stab*staebe_anzahl, segmente_pro_stab*staebe_anzahl) )
+allocate(psi_matrix( segmente_pro_stab*staebe_anzahl, segmente_pro_stab*staebe_anzahl) )
+allocate(e_matrix( segmente_pro_stab*staebe_anzahl, segmente_pro_stab*staebe_anzahl) )
 allocate(a(staebe_anzahl))
 allocate(stroeme(segmente_pro_stab * staebe_anzahl))
+allocate(anregung(segmente_pro_stab * staebe_anzahl))
+allocate(pivot(segmente_pro_stab * staebe_anzahl))
+
+do i=1, (segmente_pro_stab * staebe_anzahl)
+	anregung(i) = (0.0, 0.0)
+	stroeme(i) = (0.0, 0.0)
+end do
+anregung(3) = (1.0, 1.0)
 
 !Integration wird mit 10 Schritten momentan fest geschrieben
 !TODO: Routine schreiben / finden, die die Nodes und Weights generisch berechnet
-
+include 'integrations_konstanten.f90'
 
 
 !Radius der Staebe wird manuell eingefügt
@@ -83,15 +98,15 @@ staebe(1, 1, 3) = 0
 
 staebe(1, 2, 1) = 0
 staebe(1, 2, 2) = 0
-staebe(1, 2, 3) = 100
+staebe(1, 2, 3) = 500
 
-staebe(2, 1, 1) = 10
-staebe(2, 1, 2) = 10
-staebe(2, 1, 3) = 0
+!staebe(2, 1, 1) = 10
+!staebe(2, 1, 2) = 10
+!staebe(2, 1, 3) = 0
 
-staebe(2, 2, 1) = 10
-staebe(2, 2, 2) = 10
-staebe(2, 2, 3) = 100
+!staebe(2, 2, 1) = 10
+!staebe(2, 2, 2) = 10
+!staebe(2, 2, 3) = 100
 
 open (10,file='staebe.out')
 !Koordinaten der Segmentmittelpunkte ermitteln
@@ -138,7 +153,7 @@ do i=1, staebe_anzahl
                                 coord_z(2) = coord(i, j, 2, 2)
                                 coord_z(3) = coord(i, j, 2, 3)
 
-                                summe = 0
+                                csumme = 0
                                 do m=1, 10
 
                                     eps1 = gauss_legendre_points(m)
@@ -159,13 +174,14 @@ do i=1, staebe_anzahl
                                                                     gauss_legendre_weights, 10, kernel)
                                     call BASIS_FUNKTION(eps1, eps2, basis)
 
-                                    summe = summe + (weight * basis * kernel)
+                                    csumme = csumme + (weight * basis * kernel)
 
-
+								!print *, 'Kernel: ',kernel
                                 end do
-                                summe = delta_L * summe
-                                matrix(id_obs, id_src) = summe
-                                !write (10, *) 'Summe: ', summe
+                                csumme = delta_L * csumme
+                                matrix(id_obs, id_src) = csumme
+				!print *, csumme
+                                !write (10, *) 'Summe: ', csumme
 
 
 
@@ -174,7 +190,26 @@ do i=1, staebe_anzahl
            end do
  end do
 
-end
 
+a_matrix = matrix * MUE_NULL
+psi_matrix = (-1) / ((0.0, 1.0) * EPSILON_NULL * ( 2 * PI * fq ) ) * matrix
+e_matrix = (0.0, -1.0) * (2 * PI * fq) * a_matrix - psi_matrix
+
+write (10, *) matrix
+write(10, *) anregung
+write(10, *) e_matrix
+
+n = staebe_anzahl * segmente_pro_stab
+!call cgbsv(n, 0, 0, 1, e_matrix, n, pivot, anregung, n, info)
+call cgesv(n, 1, e_matrix, n, pivot, anregung, n, info)
+!write(10, *) info
+
+write(10, *) anregung
+!do i=1, 100
+!	write(10, *) real(anregung(i))
+!end do
+
+
+end
 
 
